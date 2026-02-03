@@ -1,6 +1,6 @@
 package domain.model;
 
-import domain.enum.ProdutoImagemTipo;
+import domain.enums.ProdutoImagemTipo;
 
 public class ProdutoImagem {
     private Long id;

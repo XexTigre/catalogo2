@@ -1,7 +1,7 @@
 package ui.controller;
 
 import app.Router;
-import domain.enum.ProdutoImagemTipo;
+import domain.enums.ProdutoImagemTipo;
 import domain.model.Produto;
 import domain.model.ProdutoImagem;
 import domain.model.ProdutoAplicacao;

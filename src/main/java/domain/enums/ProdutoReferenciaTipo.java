@@ -1,4 +1,4 @@
-package domain.enum;
+package domain.enums;
 
 public enum ProdutoReferenciaTipo {
     ORIGINAL,

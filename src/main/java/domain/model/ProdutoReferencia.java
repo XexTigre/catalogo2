@@ -1,6 +1,6 @@
 package domain.model;
 
-import domain.enum.ProdutoReferenciaTipo;
+import domain.enums.ProdutoReferenciaTipo;
 
 public class ProdutoReferencia {
     private Long id;

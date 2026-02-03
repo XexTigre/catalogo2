@@ -1,6 +1,6 @@
 package infra.dao;
 
-import domain.enum.ProdutoReferenciaTipo;
+import domain.enums.ProdutoReferenciaTipo;
 import domain.model.ProdutoReferencia;
 import infra.db.DatabaseManager;
 
