@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.SplitPane?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.image.ImageView?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+
+<BorderPane xmlns="http://javafx.com/javafx" xmlns:fx="http://javafx.com/fxml"
+            fx:controller="ui.controller.ConsultaController">
+    <top>
+        <HBox spacing="12" padding="16">
+            <Label fx:id="filtroLabel" text="Filtro aplicado" />
+            <Button text="Nova pesquisa" onAction="#onNovaPesquisa" />
+        </HBox>
+    </top>
+
+    <center>
+        <SplitPane dividerPositions="0.7">
+            <VBox spacing="12" padding="12">
+                <StackPane fx:id="listaStack">
+                    <TableView fx:id="produtosTable">
+                        <columns>
+                            <TableColumn fx:id="codigoColumn" text="Código" prefWidth="120" />
+                            <TableColumn fx:id="descricaoColumn" text="Descrição" prefWidth="240" />
+                            <TableColumn fx:id="lancamentoColumn" text="Lanç." prefWidth="80" />
+                            <TableColumn fx:id="figuraColumn" text="Fig." prefWidth="60" />
+                            <TableColumn fx:id="relacionadoColumn" text="Relac." prefWidth="70" />
+                        </columns>
+                    </TableView>
+
+                    <VBox fx:id="relacionadosView" spacing="10" padding="12" style="-fx-background-color: #f4f4f4;">
+                        <HBox spacing="8">
+                            <Label fx:id="relacionadosTitulo" text="Produtos Relacionados" />
+                            <Button text="Voltar" onAction="#onVoltarRelacionados" />
+                        </HBox>
+                        <TableView fx:id="relacionadosTable">
+                            <columns>
+                                <TableColumn fx:id="relacionadosCodigoColumn" text="Código" prefWidth="120" />
+                                <TableColumn fx:id="relacionadosDescricaoColumn" text="Descrição" prefWidth="240" />
+                            </columns>
+                        </TableView>
+                    </VBox>
+                </StackPane>
+
+                <VBox spacing="8">
+                    <Label text="Referências" style="-fx-font-weight: bold;" />
+                    <TableView fx:id="referenciasTable" prefHeight="160">
+                        <columns>
+                            <TableColumn fx:id="referenciaTipoColumn" text="Tipo" prefWidth="80" />
+                            <TableColumn fx:id="referenciaMarcaColumn" text="Marca" prefWidth="80" />
+                            <TableColumn fx:id="referenciaNomeColumn" text="Nome" prefWidth="120" />
+                            <TableColumn fx:id="referenciaCodigoColumn" text="Código" prefWidth="100" />
+                            <TableColumn fx:id="referenciaFonteColumn" text="Fonte" prefWidth="160" />
+                        </columns>
+                    </TableView>
+                </VBox>
+
+                <VBox spacing="8">
+                    <Label text="Aplicações" style="-fx-font-weight: bold;" />
+                    <TableView fx:id="aplicacoesTable" prefHeight="160">
+                        <columns>
+                            <TableColumn fx:id="aplicacaoMontadoraColumn" text="Montadora" prefWidth="80" />
+                            <TableColumn fx:id="aplicacaoVeiculoColumn" text="Veículo" prefWidth="120" />
+                            <TableColumn fx:id="aplicacaoMotorColumn" text="Motor" prefWidth="80" />
+                            <TableColumn fx:id="aplicacaoAnoColumn" text="Ano" prefWidth="80" />
+                            <TableColumn fx:id="aplicacaoObsColumn" text="Obs" prefWidth="180" />
+                        </columns>
+                    </TableView>
+                </VBox>
+            </VBox>
+
+            <VBox spacing="12" padding="12" prefWidth="320">
+                <Label text="Especificações" style="-fx-font-size: 16px; -fx-font-weight: bold;" />
+                <ImageView fx:id="produtoImagemView" fitWidth="260" fitHeight="200" preserveRatio="true" />
+                <Label fx:id="specsLabel" text="Observações do produto" wrapText="true" />
+                <Button text="Gerar ficha técnica" />
+                <Label text="Sugestão de produtos" style="-fx-font-weight: bold;" />
+                <ListView fx:id="sugestoesList" prefHeight="200" />
+            </VBox>
+        </SplitPane>
+    </center>
+</BorderPane>
