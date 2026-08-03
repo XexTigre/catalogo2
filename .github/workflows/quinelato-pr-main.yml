@@ -1,0 +1,93 @@
+name: Coletar catálogo Quinelato
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar ferramentas
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends innoextract p7zip-full cabextract libarchive-tools file binutils sqlite3 mdbtools
+
+      - name: Baixar e verificar instaladores
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p downloads extraido relatorio
+          curl -fL --retry 5 --retry-delay 3 'https://filescloud3.ideia2001.com.br/CatExp/ADAAE/InstalarCatalogoQuinelato.exe' -o downloads/InstalarCatalogoQuinelato.exe
+          curl -fL --retry 3 --retry-delay 2 'https://quinelatofreios.com.br/catalogo/catalogoqa.exe' -o downloads/catalogoqa.exe || true
+          sha256sum downloads/* | tee relatorio/SHA256SUMS.txt
+          file downloads/* | tee relatorio/tipos_instaladores.txt
+          ls -lh downloads/* | tee relatorio/tamanhos_instaladores.txt
+
+      - name: Extrair estaticamente sem executar
+        shell: bash
+        run: |
+          set -u
+          for exe in downloads/*.exe; do
+            [ -f "$exe" ] || continue
+            nome="$(basename "$exe" .exe)"
+            mkdir -p "extraido/$nome"
+            echo "===== $exe =====" | tee -a relatorio/extracao.log
+            innoextract --extract --output-dir "extraido/$nome" "$exe" >> relatorio/extracao.log 2>&1 || \
+              7z x -y -o"extraido/$nome" "$exe" >> relatorio/extracao.log 2>&1 || true
+          done
+          find extraido -type f -printf '%p\t%s\n' | sort > relatorio/inventario.tsv
+          find extraido -type f -exec file '{}' + > relatorio/file_tipos.txt
+
+      - name: Detectar bancos e referências
+        shell: bash
+        run: |
+          set -u
+          mkdir -p relatorio/sqlite relatorio/mdb relatorio/strings
+          while IFS= read -r -d '' f; do
+            if head -c 16 "$f" 2>/dev/null | grep -aq 'SQLite format 3'; then
+              nome="$(printf '%s' "${f#extraido/}" | tr '/ ' '__')"
+              cp -a "$f" "relatorio/sqlite/$nome"
+              { echo "ARQUIVO=$f"; sqlite3 "$f" 'PRAGMA integrity_check;'; sqlite3 "$f" '.tables'; sqlite3 "$f" '.schema'; } > "relatorio/sqlite/$nome.schema.txt" 2>&1 || true
+            fi
+          done < <(find extraido -type f -print0)
+          while IFS= read -r -d '' f; do
+            nome="$(printf '%s' "${f#extraido/}" | tr '/ ' '__')"
+            mdb-tables -1 "$f" > "relatorio/mdb/$nome.tables.txt" 2>&1 || true
+            mdb-schema "$f" > "relatorio/mdb/$nome.schema.sql" 2>&1 || true
+          done < <(find extraido -type f \( -iname '*.mdb' -o -iname '*.accdb' \) -print0)
+          find extraido -type f -size -80M -print0 | while IFS= read -r -d '' f; do
+            nome="$(printf '%s' "${f#extraido/}" | tr '/ ' '__')"
+            strings -a -n 6 "$f" 2>/dev/null | grep -Eai 'https?://|sqlite|\.db\b|\.mdb|\.sdf|\.fdb|produto|veiculo|aplica|similar|oem|referencia|montadora' | sort -u > "relatorio/strings/$nome.txt" || true
+            [ -s "relatorio/strings/$nome.txt" ] || rm -f "relatorio/strings/$nome.txt"
+          done
+
+      - name: Resumo
+        shell: bash
+        run: |
+          {
+            echo '# Coleta estática Quinelato'
+            echo
+            echo '- Nenhum executável foi iniciado.'
+            echo "- Arquivos extraídos: $(find extraido -type f | wc -l)"
+            echo "- Tamanho extraído: $(du -sh extraido | cut -f1)"
+            echo "- SQLite detectados: $(find relatorio/sqlite -type f ! -name '*.txt' | wc -l)"
+            echo "- Access detectados: $(find extraido -type f \( -iname '*.mdb' -o -iname '*.accdb' \) | wc -l)"
+          } > relatorio/RELATORIO.md
+
+      - name: Enviar pacote para revisão
+        uses: actions/upload-artifact@v4
+        with:
+          name: quinelato-coleta-completa
+          path: |
+            extraido/
+            relatorio/
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 7
