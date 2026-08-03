@@ -1,0 +1,174 @@
+name: Extrair banco Quinelato
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extrair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar ferramentas de análise estática
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            p7zip-full innoextract cabextract libarchive-tools sqlite3 mdbtools file binutils jq unzip zip
+
+      - name: Baixar instaladores oficiais
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p downloads resultado
+          curl -fL --retry 5 --retry-delay 3 \
+            'https://filescloud3.ideia2001.com.br/CatExp/ADAAE/InstalarCatalogoQuinelato.exe' \
+            -o downloads/InstalarCatalogoQuinelato.exe
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://quinelatofreios.com.br/catalogo/catalogoqa.exe' \
+            -o downloads/catalogoqa.exe || true
+          sha256sum downloads/* > resultado/SHA256SUMS.txt
+          file downloads/* > resultado/tipos_instaladores.txt
+          ls -lh downloads/* > resultado/tamanhos_instaladores.txt
+
+      - name: Extrair sem executar os EXEs
+        shell: bash
+        run: |
+          set -u
+          mkdir -p extraido resultado/logs
+          for exe in downloads/*.exe; do
+            [ -f "$exe" ] || continue
+            base="$(basename "$exe" .exe)"
+            out="extraido/$base"
+            mkdir -p "$out"
+            echo "### $exe" | tee -a resultado/logs/extracao.log
+            if innoextract --silent --extract --output-dir "$out" "$exe" >> resultado/logs/extracao.log 2>&1; then
+              echo "innoextract: OK" | tee -a resultado/logs/extracao.log
+            else
+              echo "innoextract falhou; tentando 7z" | tee -a resultado/logs/extracao.log
+              7z x -y -o"$out" "$exe" >> resultado/logs/extracao.log 2>&1 || true
+            fi
+          done
+          find extraido -type f -printf '%p\t%s bytes\n' | sort > resultado/inventario_arquivos.tsv
+          du -ah extraido | sort -h > resultado/tamanhos_extraidos.txt
+
+      - name: Localizar bancos e arquivos de dados
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p resultado/candidatos resultado/sqlite resultado/mdb resultado/strings
+          while IFS= read -r -d '' f; do
+            rel="${f#extraido/}"
+            mkdir -p "resultado/candidatos/$(dirname "$rel")"
+            cp -a "$f" "resultado/candidatos/$rel"
+          done < <(find extraido -type f \( \
+            -iname '*.db' -o -iname '*.db3' -o -iname '*.sqlite' -o -iname '*.sqlite3' -o \
+            -iname '*.mdb' -o -iname '*.accdb' -o -iname '*.sdf' -o -iname '*.fdb' -o -iname '*.gdb' -o \
+            -iname '*.csv' -o -iname '*.json' -o -iname '*.xml' -o -iname '*.sql' -o \
+            -iname '*.dat' -o -iname '*.bin' -o -iname '*.zip' -o -iname '*.7z' -o -iname '*.cab' \) -print0)
+          while IFS= read -r -d '' f; do
+            if head -c 16 "$f" 2>/dev/null | grep -aq 'SQLite format 3'; then
+              rel="${f#extraido/}"
+              safe="$(printf '%s' "$rel" | tr '/ ' '__')"
+              cp -a "$f" "resultado/sqlite/$safe"
+              {
+                echo "ARQUIVO: $rel"
+                echo '--- INTEGRITY CHECK ---'
+                sqlite3 "$f" 'PRAGMA integrity_check;' || true
+                echo '--- TABELAS ---'
+                sqlite3 "$f" '.tables' || true
+                echo '--- SCHEMA ---'
+                sqlite3 "$f" '.schema' || true
+              } > "resultado/sqlite/${safe}.relatorio.txt"
+            fi
+          done < <(find extraido -type f -print0)
+          while IFS= read -r -d '' f; do
+            rel="${f#extraido/}"
+            safe="$(printf '%s' "$rel" | tr '/ ' '__')"
+            mdb-tables -1 "$f" > "resultado/mdb/${safe}.tabelas.txt" 2>&1 || true
+            mdb-schema "$f" > "resultado/mdb/${safe}.schema.sql" 2>&1 || true
+          done < <(find extraido -type f \( -iname '*.mdb' -o -iname '*.accdb' \) -print0)
+          for f in downloads/*.exe; do
+            [ -f "$f" ] || continue
+            base="$(basename "$f")"
+            strings -a -n 6 "$f" | grep -Eai \
+              'https?://|\.db\b|\.sqlite|\.mdb|\.sdf|\.fdb|ADO|ODBC|SQLite|Firebird|SQL Server|Produto|Veiculo|Aplicacao|Similar|OEM|Referencia|Montadora' \
+              | sort -u > "resultado/strings/${base}.filtradas.txt" || true
+          done
+          find extraido -type f -size -20M -print0 | while IFS= read -r -d '' f; do
+            rel="${f#extraido/}"
+            safe="$(printf '%s' "$rel" | tr '/ ' '__')"
+            strings -a -n 6 "$f" 2>/dev/null | grep -Eai \
+              'https?://|\.db\b|\.sqlite|\.mdb|\.sdf|\.fdb|ADO|ODBC|SQLite|Firebird|SQL Server|Produto|Veiculo|Aplicacao|Similar|OEM|Referencia|Montadora' \
+              | sort -u > "resultado/strings/${safe}.txt" || true
+            [ -s "resultado/strings/${safe}.txt" ] || rm -f "resultado/strings/${safe}.txt"
+          done
+
+      - name: Exportar tabelas SQLite para CSV
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import csv, json, pathlib, re, sqlite3
+          root = pathlib.Path('resultado/sqlite')
+          index = []
+          for db in sorted(root.iterdir() if root.exists() else []):
+              if not db.is_file() or db.name.endswith('.txt') or db.name.endswith('.json'):
+                  continue
+              try:
+                  con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+                  tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+                  outdir = root / (db.name + '_csv')
+                  outdir.mkdir(exist_ok=True)
+                  info = {'arquivo': db.name, 'tabelas': []}
+                  for table in tables:
+                      safe = re.sub(r'[^A-Za-z0-9_.-]+', '_', table)
+                      out = outdir / f'{safe}.csv'
+                      cur = con.execute('SELECT * FROM "' + table.replace('"', '""') + '"')
+                      cols = [d[0] for d in cur.description]
+                      count = 0
+                      with out.open('w', newline='', encoding='utf-8-sig') as fh:
+                          w = csv.writer(fh); w.writerow(cols)
+                          for row in cur:
+                              w.writerow(row); count += 1
+                      info['tabelas'].append({'nome': table, 'linhas': count, 'csv': str(out)})
+                  index.append(info); con.close()
+              except Exception as exc:
+                  index.append({'arquivo': db.name, 'erro': repr(exc)})
+          (root / 'indice_exportacao.json').write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding='utf-8')
+          PY
+
+      - name: Gerar resumo final
+        shell: bash
+        run: |
+          {
+            echo '# Extração estática do catálogo Quinelato'
+            echo
+            echo '- Executáveis somente baixados e descompactados; nenhum EXE foi executado.'
+            echo "- Data UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "- Arquivos extraídos: $(find extraido -type f | wc -l)"
+            echo "- SQLite detectados: $(find resultado/sqlite -maxdepth 1 -type f ! -name '*.txt' ! -name '*.json' | wc -l)"
+            echo "- Access detectados: $(find extraido -type f \( -iname '*.mdb' -o -iname '*.accdb' \) | wc -l)"
+            echo "- Candidatos copiados: $(find resultado/candidatos -type f | wc -l)"
+            echo
+            echo '## Arquivos SQLite'
+            find resultado/sqlite -maxdepth 1 -type f ! -name '*.txt' ! -name '*.json' -printf -- '- %f\n' || true
+            echo
+            echo '## Arquivos Access'
+            find extraido -type f \( -iname '*.mdb' -o -iname '*.accdb' \) -printf -- '- %p\n' || true
+          } > resultado/RELATORIO.md
+
+      - name: Publicar resultado da extração
+        uses: actions/upload-artifact@v4
+        with:
+          name: quinelato-banco-extraido
+          path: resultado/
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 7
